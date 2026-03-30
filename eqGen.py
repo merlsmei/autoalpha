@@ -2,7 +2,8 @@
 eqGen.py — Alpha Equation Generator
 
 Reads eqGenPolicy.md and uses the DeepSeek API to generate a novel alpha
-equation that conforms to the policy rules.
+equation that conforms to the policy rules. Each generated alpha is saved
+to equations/alphaEqN.md (auto-numbered, continuing from existing files).
 
 Usage:
     python eqGen.py
@@ -18,6 +19,7 @@ Environment:
 
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -44,7 +46,10 @@ def build_messages(policy_text: str, theme: str | None, n: int) -> list[dict]:
 
     count_clause = f"Generate exactly {n} alpha equation{'s' if n > 1 else ''}."
     if n > 1:
-        count_clause += " Each alpha must represent a distinct signal — do not produce near-duplicates."
+        count_clause += (
+            " Each alpha must represent a distinct signal — do not produce near-duplicates."
+            " Separate each alpha with a line containing exactly `---ALPHA---` and nothing else."
+        )
 
     user_prompt = (
         f"Below is the Alpha Equation Generation Policy. Read it carefully before generating any alpha.\n\n"
@@ -87,6 +92,43 @@ def call_deepseek(messages: list[dict], api_key: str) -> str:
     return response.choices[0].message.content
 
 
+def next_eq_number(equations_dir: Path) -> int:
+    """Return the next available alpha equation number."""
+    if not equations_dir.exists():
+        return 1
+    existing = [
+        int(m.group(1))
+        for f in equations_dir.iterdir()
+        if (m := re.fullmatch(r"alphaEq(\d+)\.md", f.name))
+    ]
+    return max(existing, default=0) + 1
+
+
+def split_alphas(raw: str, expected: int) -> list[str]:
+    """Split LLM response into individual alpha blocks."""
+    parts = [p.strip() for p in re.split(r"^---ALPHA---$", raw, flags=re.MULTILINE)]
+    parts = [p for p in parts if p]
+    if len(parts) != expected:
+        # Fall back: treat the whole response as one block
+        return [raw.strip()]
+    return parts
+
+
+def save_equations(alphas: list[str], equations_dir: Path) -> list[Path]:
+    """Write each alpha block to a numbered alphaEqN.md file."""
+    equations_dir.mkdir(parents=True, exist_ok=True)
+    start = next_eq_number(equations_dir)
+    saved = []
+    for i, alpha_text in enumerate(alphas):
+        n = start + i
+        path = equations_dir / f"alphaEq{n}.md"
+        content = f"# Alpha Equation {n}\n\n{alpha_text}\n"
+        path.write_text(content, encoding="utf-8")
+        saved.append(path)
+        print(f"Saved: {path}")
+    return saved
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate alpha equations using DeepSeek and eqGenPolicy.md"
@@ -122,6 +164,7 @@ def main():
 
     script_dir = Path(__file__).parent
     policy_path = Path(args.policy) if args.policy else script_dir / "eqGenPolicy.md"
+    equations_dir = script_dir / "equations"
 
     policy_text = load_policy(policy_path)
     messages = build_messages(policy_text, theme=args.theme, n=args.n)
@@ -130,6 +173,10 @@ def main():
 
     result = call_deepseek(messages, api_key)
     print(result)
+    print()
+
+    alphas = split_alphas(result, args.n)
+    save_equations(alphas, equations_dir)
 
 
 if __name__ == "__main__":
