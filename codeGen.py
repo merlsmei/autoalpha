@@ -1,13 +1,16 @@
 """
 codeGen.py — Alpha Java Code Generator
 
-Reads codeGenPolicy.md and a specific equations/alphaEqN.md, then calls the
-DeepSeek API to produce a compilable Java implementation of the alpha.
-The output is saved to java/alphaCodeN.java.
+Reads codeGenPolicy.md and automatically finds the alpha equation with the
+smallest number that has not yet been implemented. Calls the DeepSeek API
+to produce a compilable Java implementation, saved to java/alphaCodeN.java.
+
+Equation files:  equations/alphaN.md
+Java output:     java/alphaCodeN.java
 
 Usage:
-    python codeGen.py --eq 1
-    python codeGen.py --eq 3 --policy codeGenPolicy.md
+    python codeGen.py
+    python codeGen.py --policy codeGenPolicy.md
 
 Requirements:
     pip install openai
@@ -30,6 +33,28 @@ def load_file(path: Path, label: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def find_next_unimplemented(equations_dir: Path, java_dir: Path) -> int | None:
+    """Return the smallest alpha number present in equations/ but missing in java/."""
+    if not equations_dir.exists():
+        return None
+    eq_nums = {
+        int(m.group(1))
+        for f in equations_dir.iterdir()
+        if (m := re.fullmatch(r"alpha(\d+)\.md", f.name))
+    }
+    if not eq_nums:
+        return None
+    impl_nums = set()
+    if java_dir.exists():
+        impl_nums = {
+            int(m.group(1))
+            for f in java_dir.iterdir()
+            if (m := re.fullmatch(r"alphaCode(\d+)\.java", f.name))
+        }
+    pending = sorted(eq_nums - impl_nums)
+    return pending[0] if pending else None
+
+
 def build_messages(policy_text: str, eq_text: str, eq_num: int) -> list[dict]:
     system_prompt = (
         "You are an expert Java engineer implementing quantitative alpha strategies for a systematic trading system. "
@@ -41,7 +66,7 @@ def build_messages(policy_text: str, eq_text: str, eq_num: int) -> list[dict]:
     user_prompt = (
         "Below is the Java Code Generation Policy. Follow it exactly.\n\n"
         f"---\n{policy_text}\n---\n\n"
-        f"Below is the alpha equation to implement (Alpha Equation {eq_num}):\n\n"
+        f"Below is the alpha equation to implement (Alpha {eq_num}):\n\n"
         f"---\n{eq_text}\n---\n\n"
         f"Implement this alpha as `AlphaCode{eq_num}` following all rules in the policy. "
         f"The class must be in file `alphaCode{eq_num}.java`, package `alpha`, and implement `AlphaStrategy`. "
@@ -88,13 +113,10 @@ def strip_code_fences(text: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate a Java alpha implementation using DeepSeek and codeGenPolicy.md"
-    )
-    parser.add_argument(
-        "--eq",
-        type=int,
-        required=True,
-        help="Alpha equation number N — reads equations/alphaEqN.md, writes java/alphaCodeN.java",
+        description=(
+            "Generate a Java alpha implementation using DeepSeek and codeGenPolicy.md. "
+            "Automatically picks the smallest equation number not yet implemented."
+        )
     )
     parser.add_argument(
         "--policy",
@@ -115,16 +137,23 @@ def main():
 
     script_dir = Path(__file__).parent
     policy_path = Path(args.policy) if args.policy else script_dir / "codeGenPolicy.md"
-    eq_path = script_dir / "equations" / f"alphaEq{args.eq}.md"
+    equations_dir = script_dir / "equations"
     java_dir = script_dir / "java"
-    out_path = java_dir / f"alphaCode{args.eq}.java"
+
+    eq_num = find_next_unimplemented(equations_dir, java_dir)
+    if eq_num is None:
+        print("All equations are already implemented.")
+        sys.exit(0)
+
+    eq_path = equations_dir / f"alpha{eq_num}.md"
+    out_path = java_dir / f"alphaCode{eq_num}.java"
 
     policy_text = load_file(policy_path, "code generation policy")
-    eq_text = load_file(eq_path, f"alpha equation {args.eq}")
+    eq_text = load_file(eq_path, f"alpha equation {eq_num}")
 
-    messages = build_messages(policy_text, eq_text, args.eq)
+    messages = build_messages(policy_text, eq_text, eq_num)
 
-    print(f"Generating Java implementation for Alpha Equation {args.eq}...\n")
+    print(f"Generating Java implementation for Alpha {eq_num} ({eq_path.name} → {out_path.name})...\n")
 
     raw = call_deepseek(messages, api_key)
     java_code = strip_code_fences(raw)

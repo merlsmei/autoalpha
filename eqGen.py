@@ -3,7 +3,7 @@ eqGen.py — Alpha Equation Generator
 
 Reads eqGenPolicy.md and uses the DeepSeek API to generate a novel alpha
 equation that conforms to the policy rules. Each generated alpha is saved
-to equations/alphaEqN.md (auto-numbered, continuing from existing files).
+to equations/alphaN.md (auto-numbered, continuing from existing files).
 
 Usage:
     python eqGen.py
@@ -99,7 +99,7 @@ def next_eq_number(equations_dir: Path) -> int:
     existing = [
         int(m.group(1))
         for f in equations_dir.iterdir()
-        if (m := re.fullmatch(r"alphaEq(\d+)\.md", f.name))
+        if (m := re.fullmatch(r"alpha(\d+)\.md", f.name))
     ]
     return max(existing, default=0) + 1
 
@@ -121,7 +121,7 @@ def save_equations(alphas: list[str], equations_dir: Path) -> list[Path]:
     saved = []
     for i, alpha_text in enumerate(alphas):
         n = start + i
-        path = equations_dir / f"alphaEq{n}.md"
+        path = equations_dir / f"alpha{n}.md"
         content = f"# Alpha Equation {n}\n\n{alpha_text}\n"
         path.write_text(content, encoding="utf-8")
         saved.append(path)
